@@ -1,0 +1,116 @@
+노드1
+
+#include <df_can.h>
+#include <SPI.h>
+#include "LedControl.h"
+
+const int SPI_CS_PIN = 10;
+MCPCAN CAN(SPI_CS_PIN);
+const int humanSensorPin = 7; // 인체 감지 센서 핀
+LedControl lc = LedControl(5, 4, 3, 1); // Pins: 5 = Data, 4 = Clock, 3 = CS
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(humanSensorPin, INPUT);
+
+  lc.shutdown(0, false);      // 절전 모드 해제
+  lc.setIntensity(0, 8);      // 밝기 설정 (0~15)
+  lc.clearDisplay(0);   
+  CAN.init();
+
+  if (CAN.begin(CAN_1000KBPS) == CAN_OK) {
+    Serial.println("CAN BUS Shield init ok!");
+  } else {
+    Serial.println("CAN BUS Shield init failed");
+    while (1);
+  }
+}
+
+void loop() {
+  unsigned char len = 0;
+  unsigned char buf[8];
+
+  if (digitalRead(humanSensorPin) == HIGH) { // 인체 감지 센서 감지
+    Serial.println("Motion detected! Sending message to CAN2...");
+    CAN.sendMsgBuf(0x02, 0, 8, "M"); // 서보모터 동작 메시지 CAN2로 전송
+  }
+
+  if (CAN.checkReceive() == CAN_MSGAVAIL) { // CAN 메시지 수신 대기
+    CAN.readMsgBuf(&len, buf);
+    unsigned int id = CAN.getCanId();
+    Serial.print("Message received with ID: ");
+    Serial.print(id);
+    Serial.print(", First byte: ");
+    Serial.println(buf[0]);
+
+    if (id == 0x01 || buf[0] == 'T') { // CAN2에서 터치 센서 메시지 수신
+      Serial.println("Received touch signal from CAN2. Activating 8x8 matrix...");
+      for (int i = 0; i < 8; i++) {
+        lc.setRow(0, i, B11111111); // 모든 LED를 켜서 전체 매트릭스에 불이 들어오게 함
+      }
+    }
+    else
+    {
+      for (int i = 0; i < 8; i++) {
+        lc.setRow(0, i, B00000000); // 터치 떼면 불 꺼짐
+      }
+    }  
+    
+  }
+  delay(1000);
+}
+
+
+노드2
+
+#include <df_can.h>
+#include <SPI.h>
+#include <Servo.h>
+
+const int SPI_CS_PIN = 10;
+MCPCAN CAN(SPI_CS_PIN);
+Servo servoMotor;
+const int touchSensorPin = 5; // 터치 센서 핀
+const int servoPin = 9; // 서보모터 핀
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(touchSensorPin, INPUT);
+  servoMotor.attach(servoPin);
+  CAN.init();
+  if (CAN_OK == CAN.begin(CAN_1000KBPS)) {
+    Serial.println("CAN BUS Shield init ok!");
+  } else {
+    Serial.println("CAN BUS Shield init failed");
+    while (1);
+  }
+}
+
+void loop() {
+  unsigned char len = 0;
+  unsigned char buf[8];
+
+  if (digitalRead(touchSensorPin) == HIGH) { // 터치 센서 감지
+    Serial.println("Touch detected! Sending message to CAN1...");
+    CAN.sendMsgBuf(0x01, 0, 8, "T"); // 매트릭스 점등 메시지 CAN1로 전송
+  }
+
+  if (CAN_MSGAVAIL == CAN.checkReceive()) { // CAN 메시지 수신 대기
+    CAN.readMsgBuf(&len, buf);
+    unsigned int id = CAN.getCanId();
+    if (id == 0x02 || buf[0] == 'M') { // CAN1에서 인체 감지 센서 메시지 수신
+      Serial.println("Received motion signal from CAN1. Activating servo motor...");
+      // 서보 모터를 0도에서 180도까지 돌림
+      for (int pos = 0; pos <= 180; pos++) {
+        servoMotor.write(pos);
+      
+      }
+      for (int pos = 180; pos >= 0; pos--) {
+        servoMotor.write(pos);
+      
+      }
+    }
+  }
+  
+  delay(1000);
+}
